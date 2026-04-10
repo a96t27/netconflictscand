@@ -1,0 +1,10 @@
+*.swp
+.editorconfig
+*.o
+*.a
+c_cpp_properties.json
+.vscode
+todo.txt
+/build/
+/tuyad
+/bin/
