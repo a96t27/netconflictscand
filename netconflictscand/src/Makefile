@@ -1,5 +1,5 @@
 CFLAGS += -Wall -Wextra -pedantic
-CPPFLAGS = -I./include
+CPPFLAGS += -I./include
 BIN = bin/netconflictscand
 BUILD_DIR := build
 SRCS = $(wildcard src/*.c)
@@ -12,7 +12,7 @@ all: $(BIN)
 
 $(BIN): $(OBJS)
 
-	$(CC) -o $@ $^ 
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDLIBS)   -o $@ $^ 
 
 build: $(BIN)
 
@@ -20,7 +20,7 @@ objects: $(OBJS)
 
 bin/%.o: src/%.c
 	mkdir -p bin/
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDLIBS) -c -o $@ $^
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDLIBS)  -c -o $@ $^
 
 clean:
 	${RM} $(BIN) $(OBJS)

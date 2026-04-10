@@ -99,14 +99,10 @@ int find_conflict(struct Address **list, struct Address *addr)
                 uint32_t net1_start = ip1 & mask1;
                 uint32_t net1_end = net1_start | (~mask1);
 
-                // printf("mask:%08x wildcard:%08x address:%08x beg:%08x end:%08x \t", mask1, ~mask1, ip1, net1_start, net1_end);
-
                 uint32_t mask2 = get_mask(temp->prefix);
                 uint32_t ip2 = ntohl(temp->ip);
                 uint32_t net2_start = ip2 & mask2;
                 uint32_t net2_end = net2_start | (~mask2);
-
-                // printf("mask:%08x wildcard:%08x address:%08x beg:%08x end:%08x\n", mask2, ~mask2, ip2, net2_start, net2_end);
 
                 if ((net1_start >= net2_start && net1_start <= net2_end) || (net1_end >= net2_start && net1_end <= net2_end)) {
                         return temp->ifa_index;

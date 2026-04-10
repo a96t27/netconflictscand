@@ -17,7 +17,9 @@ endef
 
 define Package/netconflictscand/install
 	$(INSTALL_DIR) $(1)/usr/bin
+	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/bin/netconflictscand $(1)/usr/bin
+	$(INSTALL_BIN) ./files/netconflictscand.init $(1)/etc/init.d/netconflictscand
 endef
 
 $(eval $(call BuildPackage,netconflictscand))
