@@ -14,17 +14,6 @@
 #include <unistd.h>
 
 
-
-static int running = 1;
-
-
-void sig_handler(int sigint)
-{
-        (void)sigint;
-        running = 0;
-}
-
-
 int get_addr(struct nlmsghdr *nh, struct Address **addr)
 {
         if (nh == NULL || addr == NULL) {
@@ -34,7 +23,7 @@ int get_addr(struct nlmsghdr *nh, struct Address **addr)
         struct ifaddrmsg *ifa = NLMSG_DATA(nh);
 
         if (ifa->ifa_family == AF_INET6 || ifa->ifa_scope == RT_SCOPE_HOST) {
-                return EXIT_FAILURE;
+                return EXIT_UNSUPPORTED_NETWORK_TYPE;
         }
 
         struct rtattr *rth = IFA_RTA(ifa);
@@ -61,30 +50,33 @@ int get_addr(struct nlmsghdr *nh, struct Address **addr)
         return EXIT_SUCCESS;
 }
 
-void log_conflict_msg(int ifa_index1, int ifa_index2)
-{
-        char label1[IF_NAMESIZE] = { 0 };
-        if_indextoname(ifa_index1, label1);
-        char label2[IF_NAMESIZE] = { 0 };
-        if_indextoname(ifa_index2, label2);
-        syslog(LOG_ALERT, "Found conflict between %.*s and %.*s interfaces\n", IF_NAMESIZE, label1, IF_NAMESIZE, label2);
-}
 
-int handle_newaddr(struct nlmsghdr *nh, struct Address **list)
+int handle_newaddr(struct nlmsghdr *nh, struct Address **list, struct Address **conflicts)
 {
-        struct Address *addr = NULL;
-        if (get_addr(nh, &addr) != EXIT_SUCCESS || addr == NULL) {
+        if (nh == NULL || list == NULL || conflicts == NULL) {
                 return EXIT_FAILURE;
         }
-        int ifa_index;
-        if ((ifa_index = find_conflict(list, addr)) >= 0) {
-                log_conflict_msg(addr->ifa_index, ifa_index);
+        struct Address *addr = NULL;
+        if (get_addr(nh, &addr) != EXIT_SUCCESS) {
+                return EXIT_FAILURE;
         }
-        return add_addr(list, addr);
+        *conflicts = find_conflicts(list, addr);
+
+        if (add_addr(list, addr) != EXIT_SUCCESS) {
+                return EXIT_FAILURE;
+        }
+
+        if (conflicts != NULL) {
+                return EXIT_SUBNET_CONFLICT;
+        }
+        return EXIT_SUCCESS;
 }
 
 int handle_deladdr(struct nlmsghdr *nh, struct Address **list)
 {
+        if (nh == NULL || list == NULL) {
+                return EXIT_FAILURE;
+        }
         struct Address *addr = NULL;
         if (get_addr(nh, &addr) != EXIT_SUCCESS || addr == NULL) {
                 return EXIT_FAILURE;
@@ -97,9 +89,6 @@ int handle_deladdr(struct nlmsghdr *nh, struct Address **list)
 
 void request_addrs(int fd, int sequence_number)
 {
-        if (!running) {
-                return;
-        }
         struct {
                 struct nlmsghdr nh;
                 struct ifaddrmsg ifa;
@@ -115,59 +104,68 @@ void request_addrs(int fd, int sequence_number)
         send(fd, &req_addr, req_addr.nh.nlmsg_len, 0);
 }
 
-void receive(struct sockaddr_nl *sa, int sa_size, int fd, struct Address **list)
+int receive_netlink_events(struct sockaddr_nl *sa, int sa_size, int fd, struct Address **list, struct Address **conflicts)
 {
-
+        if (sa == NULL || sa_size < 1 || fd < 0 || list == NULL || conflicts == NULL) {
+                return EXIT_FAILURE;
+        }
+        *conflicts = NULL;
         char buf[8192];
         struct nlmsghdr *nh;
-        while (running) {
+        struct iovec iov = { buf, sizeof(buf) };
+        struct msghdr msg = { sa, sa_size, &iov, 1, NULL, 0, 0 };
+        int size = recvmsg(fd, &msg, 0);
+        int ret = EXIT_SUCCESS;
+        if (size < 0) {
+                syslog(LOG_ERR, "Failed to receive message");
+                return EXIT_FAILURE;
+        }
 
-                struct iovec iov = { buf, sizeof(buf) };
-                struct msghdr msg = { sa, sa_size, &iov, 1, NULL, 0, 0 };
+        if (msg.msg_flags & MSG_TRUNC) {
+                syslog(LOG_DEBUG, "Truncated message");
+                return EXIT_FAILURE;
+        }
 
-                int size = recvmsg(fd, &msg, 0);
-                if (size < 0) {
-                        syslog(LOG_ERR, "Failed to receive message");
-                        continue;
+        for (nh = (struct nlmsghdr *)buf; NLMSG_OK(nh, size);
+                nh = NLMSG_NEXT(nh, size)) {
+
+                switch (nh->nlmsg_type) {
+
+                case NLMSG_DONE:
+                        return EXIT_SUCCESS;
+
+                case NLMSG_ERROR: {
+                        struct nlmsgerr *err = NLMSG_DATA(nh);
+                        if (err->error != 0) {
+                                syslog(LOG_ERR, "Netlink error: %d\n", err->error);
+                        }
+                        return EXIT_FAILURE;
                 }
 
-                if (msg.msg_flags & MSG_TRUNC) {
-                        syslog(LOG_DEBUG, "Truncated message");
-                        continue;
-                }
-
-                for (nh = (struct nlmsghdr *)buf; NLMSG_OK(nh, size);
-                        nh = NLMSG_NEXT(nh, size)) {
-
-                        switch (nh->nlmsg_type) {
-
-                        case NLMSG_DONE:
-                                return;
-
-                        case NLMSG_ERROR: {
-                                struct nlmsgerr *err = NLMSG_DATA(nh);
-                                if (err->error != 0) {
-                                        syslog(LOG_ERR, "Netlink error: %d\n", err->error);
-                                }
-                                return;
+                case RTM_DELADDR:
+                        ret = handle_deladdr(nh, list);
+                        if (ret == EXIT_SUCCESS) {
+                                syslog(LOG_DEBUG, "Address removed");
+                        } else {
+                                syslog(LOG_ERR, "Failed to handle RTM_DELADDR message");
                         }
+                        break;
 
-                        case RTM_DELADDR:
-                                if (handle_deladdr(nh, list) == EXIT_SUCCESS) {
-                                        syslog(LOG_DEBUG, "Address removed");
-                                } else {
-                                        syslog(LOG_ERR, "Failed to handle RTM_DELADDR message");
-                                }
+                case RTM_NEWADDR:
+                        ret = handle_newaddr(nh, list, conflicts);
+                        switch (ret) {
+                        case EXIT_SUCCESS:
+                                syslog(LOG_DEBUG, "New address added");
                                 break;
-
-                        case RTM_NEWADDR:
-                                if (handle_newaddr(nh, list) == EXIT_SUCCESS) {
-                                        syslog(LOG_DEBUG, "Address added");
-                                } else {
-                                        syslog(LOG_ERR, "Failed to handle RTM_NEWADDR message");
-                                }
+                        case EXIT_SUBNET_CONFLICT:
+                                syslog(LOG_ERR, "Found conflicting subnet");
+                                break;
+                        default:
+                                syslog(LOG_ERR, "Failed to add new addres");
                                 break;
                         }
+                        break;
                 }
         }
+        return ret;
 }

@@ -8,13 +8,15 @@
 #include <arpa/inet.h>
 #include <addrlist.h>
 
+enum {
+        EXIT_SUBNET_CONFLICT = EXIT_FAILURE + 1,
+        EXIT_UNSUPPORTED_NETWORK_TYPE,
+};
 
 int get_addr(struct nlmsghdr *nh, struct Address **addr);
-void log_conflict_msg(int ifa_index1, int ifa_index2);
-int handle_newaddr(struct nlmsghdr *nh, struct Address **list);
+int handle_newaddr(struct nlmsghdr *nh, struct Address **list, struct Address **conflicts);
 int handle_deladdr(struct nlmsghdr *nh, struct Address **list);
-void sig_handler(int sigint);
 void request_addrs(int fd, int sequence_number);
-void receive(struct sockaddr_nl *sa, int sa_size, int fd, struct Address **list);
+int receive_netlink_events(struct sockaddr_nl *sa, int sa_size, int fd, struct Address **list, struct Address **conflicts);
 
 #endif

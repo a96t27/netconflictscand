@@ -12,29 +12,25 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <netlink_methods.h>
+#include <libubox/blobmsg_json.h>
+#include <libubus.h>
+#include <ubus_methods.h>
+#include <netlink_methods.h>
+#include <fcntl.h>
 
 
 int main(void)
 {
 	setlogmask(LOG_UPTO(LOG_DEBUG));
-	signal(SIGINT, sig_handler);
-	signal(SIGTERM, sig_handler);
-	signal(SIGQUIT, sig_handler);
-	signal(SIGABRT, SIG_IGN);
-	signal(SIGILL, SIG_IGN);
-	signal(SIGFPE, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
-	signal(SIGIO, SIG_IGN);
-	signal(SIGUSR1, SIG_IGN);
-	signal(SIGUSR2, SIG_IGN);
 
 	openlog("netconflictscand", LOG_CONS | LOG_PID | LOG_NDELAY | LOG_PERROR, LOG_USER);
 	syslog(LOG_INFO, "Starting netconflictscand process");
 
 	int ret = EXIT_SUCCESS;
-	struct sockaddr_nl sa = { 0 };
-	sa.nl_family = AF_NETLINK;
-	sa.nl_groups = RTMGRP_IPV4_IFADDR;
+	struct sockaddr_nl sa = {
+		.nl_family = AF_NETLINK,
+		.nl_groups = RTMGRP_IPV4_IFADDR,
+	};
 
 	int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (fd < 0) {
@@ -48,14 +44,37 @@ int main(void)
 		ret = EXIT_FAILURE;
 		goto err_no_bind;
 	}
+
+	fcntl(fd, F_SETFL, O_NONBLOCK);
+
+
 	struct Address *list = NULL;
+	struct NetlinkContext nl_ctx = {
+		.list = &list,
+		.sa = &sa,
+		.sa_size = sizeof(sa),
+		.fd = fd,
+	};
 
-	int sequence_number = 0;
-	request_addrs(fd, ++sequence_number);
-	receive(&sa, sizeof(sa), fd, &list);
+	if (uloop_init() != EXIT_SUCCESS) {
+		syslog(LOG_CRIT, "Failed to initiate ubus context");
+		goto err_no_uloop_init;
+	}
+	struct ubus_context *ubus_ctx = ubus_connect(NULL);
 
-	receive(&sa, sizeof(sa), fd, &list);
+	if (ubus_ctx == NULL) {
+		syslog(LOG_CRIT, "Failed to connect to ubusd");
+		goto err_no_ubus_ctx;
+	}
 
+	ubus_add_uloop(ubus_ctx);
+
+	main_loop(ubus_ctx, &nl_ctx);
+
+	ubus_free(ubus_ctx);
+err_no_ubus_ctx:
+	uloop_done();
+err_no_uloop_init:
 	free_addr_list(&list);
 err_no_bind:
 	close(fd);

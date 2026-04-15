@@ -9,6 +9,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/netconflictscand
 	CATEGORY := Net
 	TITLE:=Netconflictscand
+	DEPENDS := libubus libubox libblobmsg-json
 endef
 
 define Package/netconflictscand/description

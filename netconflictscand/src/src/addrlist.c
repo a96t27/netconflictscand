@@ -6,43 +6,25 @@
 
 uint32_t get_mask(uint32_t prefix)
 {
-        return 0xFFFFFFFF << (32 - prefix);
+        return ntohl(0xFFFFFFFF << (32 - prefix));
 }
 
 struct Address *create_address(uint32_t ip, uint32_t prefix, uint32_t ifa_index)
 {
         if (prefix > 32) {
-                prefix = 0;
+                return NULL;
         }
         struct Address *addr = NULL;
         addr = (struct Address *)malloc(sizeof(struct Address));
+        if (addr == NULL) {
+                return NULL;
+        }
         addr->ifa_index = ifa_index;
         addr->prefix = prefix;
         addr->ip = ip;
         addr->next = NULL;
         return addr;
 }
-
-void print_addrs(struct Address **list)
-{
-        if (list == NULL) {
-                return;
-        }
-        printf("\n");
-        uint32_t mask = 0;
-        char ipbuf[INET_ADDRSTRLEN] = { 0 };
-        char maskbuf[INET_ADDRSTRLEN] = { 0 };
-        for (struct Address *cur = *list; cur != NULL; cur = cur->next) {
-                mask = ntohl(get_mask(cur->prefix));
-                inet_ntop(AF_INET, &cur->ip, ipbuf, sizeof(ipbuf));
-                inet_ntop(AF_INET, &mask, maskbuf, sizeof(maskbuf));
-                char label[IF_NAMESIZE] = { 0 };
-                if_indextoname(cur->ifa_index, label);
-                printf("if:%.*s(%x) ip:%.*s mask:%.*s\n", IF_NAMESIZE, label, cur->ifa_index, INET_ADDRSTRLEN, ipbuf, INET_ADDRSTRLEN, maskbuf);
-        }
-        printf("\n");
-}
-
 
 int add_addr(struct Address **list, struct Address *addr)
 {
@@ -56,18 +38,22 @@ int add_addr(struct Address **list, struct Address *addr)
         return EXIT_SUCCESS;
 }
 
+int are_addrs_equal(struct Address *a1, struct Address *a2)
+{
+        if (a1 == NULL || a2 == NULL) {
+                return a1 == a2;
+        }
+        return a1->ip == a2->ip && a1->ifa_index == a2->ifa_index && a1->prefix == a2->prefix;
+}
 
 int del_addr(struct Address **list, struct Address *addr)
 {
-        if (list == NULL || addr == NULL) {
-                return EXIT_FAILURE;
-        }
-        if (*list == NULL) {
+        if (list == NULL || addr == NULL || *list == NULL) {
                 return EXIT_FAILURE;
         }
 
         struct Address *to_del = *list;
-        if (to_del->ip == addr->ip && to_del->ifa_index == addr->ifa_index && to_del->prefix == addr->prefix) {
+        if (are_addrs_equal(to_del, addr)) {
                 *list = to_del->next;
                 free(to_del);
                 return EXIT_SUCCESS;
@@ -75,7 +61,7 @@ int del_addr(struct Address **list, struct Address *addr)
 
         for (struct Address *temp = *list; temp->next != NULL; temp = temp->next) {
                 to_del = temp->next;
-                if (to_del->ip == addr->ip && to_del->ifa_index == addr->ifa_index && to_del->prefix == addr->prefix) {
+                if (are_addrs_equal(to_del, addr)) {
                         temp->next = to_del->next;
                         free(to_del);
                         return EXIT_SUCCESS;
@@ -84,31 +70,47 @@ int del_addr(struct Address **list, struct Address *addr)
         return EXIT_FAILURE;
 }
 
+int are_overlapping_subnets(struct Address *a1, struct Address *a2)
+{
+        if (a1 == NULL || a2 == NULL) {
+                return 0;
+        }
+        if (a1->ifa_index == a2->ifa_index) {
+                return 0;
+        }
+        uint32_t mask1 = a1->prefix;
+        uint32_t ip1 = a1->ip;
+        uint32_t net1_start = ip1 & mask1;
+        uint32_t net1_end = net1_start | (~mask1);
 
-int find_conflict(struct Address **list, struct Address *addr)
+        uint32_t mask2 = a2->prefix;
+        uint32_t ip2 = a2->ip;
+        uint32_t net2_start = ip2 & mask2;
+        uint32_t net2_end = net2_start | (~mask2);
+
+        return (net1_start >= net2_start && net1_start <= net2_end)
+                || (net1_end >= net2_start && net1_end <= net2_end);
+}
+
+struct Address *find_conflicts(struct Address **list, struct Address *addr)
 {
         if (list == NULL || addr == NULL) {
-                return -1;
+                return NULL;
         }
+        struct Address *conflict_list = NULL;
+
         for (struct Address *temp = *list; temp != NULL; temp = temp->next) {
                 if (temp->ifa_index == addr->ifa_index) {
                         continue;
                 }
-                uint32_t mask1 = get_mask(addr->prefix);
-                uint32_t ip1 = ntohl(addr->ip);
-                uint32_t net1_start = ip1 & mask1;
-                uint32_t net1_end = net1_start | (~mask1);
-
-                uint32_t mask2 = get_mask(temp->prefix);
-                uint32_t ip2 = ntohl(temp->ip);
-                uint32_t net2_start = ip2 & mask2;
-                uint32_t net2_end = net2_start | (~mask2);
-
-                if ((net1_start >= net2_start && net1_start <= net2_end) || (net1_end >= net2_start && net1_end <= net2_end)) {
-                        return temp->ifa_index;
+                if (are_overlapping_subnets(temp, addr)) {
+                        add_addr(&conflict_list, create_address(temp->ip, temp->prefix, temp->ifa_index));
                 }
         }
-        return -1;
+        if (conflict_list != NULL) {
+                add_addr(&conflict_list, create_address(addr->ip, addr->prefix, addr->ifa_index));
+        }
+        return conflict_list;
 }
 
 void free_addr_list(struct Address **list)

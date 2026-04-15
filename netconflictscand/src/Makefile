@@ -1,5 +1,6 @@
 CFLAGS += -Wall -Wextra -pedantic
 CPPFLAGS += -I./include
+LDLIBS += -lblobmsg_json -lubox -lubus
 BIN = bin/netconflictscand
 BUILD_DIR := build
 SRCS = $(wildcard src/*.c)
