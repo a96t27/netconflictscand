@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <syslog.h>
 
 uint32_t get_mask(uint32_t prefix)
 {
-        return ntohl(0xFFFFFFFF << (32 - prefix));
+        return htonl(0xFFFFFFFF << (32 - prefix));
 }
 
 struct Address *create_address(uint32_t ip, uint32_t prefix, uint32_t ifa_index)
@@ -46,6 +47,7 @@ int are_addrs_equal(struct Address *a1, struct Address *a2)
         return a1->ip == a2->ip && a1->ifa_index == a2->ifa_index && a1->prefix == a2->prefix;
 }
 
+
 int del_addr(struct Address **list, struct Address *addr)
 {
         if (list == NULL || addr == NULL || *list == NULL) {
@@ -70,6 +72,7 @@ int del_addr(struct Address **list, struct Address *addr)
         return EXIT_FAILURE;
 }
 
+
 int are_overlapping_subnets(struct Address *a1, struct Address *a2)
 {
         if (a1 == NULL || a2 == NULL) {
@@ -78,18 +81,17 @@ int are_overlapping_subnets(struct Address *a1, struct Address *a2)
         if (a1->ifa_index == a2->ifa_index) {
                 return 0;
         }
-        uint32_t mask1 = a1->prefix;
-        uint32_t ip1 = a1->ip;
+        uint32_t mask1 = ntohl(get_mask(a1->prefix));
+        uint32_t ip1 = ntohl(a1->ip);
         uint32_t net1_start = ip1 & mask1;
         uint32_t net1_end = net1_start | (~mask1);
 
-        uint32_t mask2 = a2->prefix;
-        uint32_t ip2 = a2->ip;
+        uint32_t mask2 = ntohl(get_mask(a2->prefix));
+        uint32_t ip2 = ntohl(a2->ip);
         uint32_t net2_start = ip2 & mask2;
         uint32_t net2_end = net2_start | (~mask2);
-
-        return (net1_start >= net2_start && net1_start <= net2_end)
-                || (net1_end >= net2_start && net1_end <= net2_end);
+        syslog(LOG_DEBUG, )
+                return (net1_start <= net2_end) && (net2_start <= net1_end);
 }
 
 struct Address *find_conflicts(struct Address **list, struct Address *addr)
