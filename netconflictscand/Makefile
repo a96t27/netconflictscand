@@ -7,13 +7,15 @@ PKG_VERSION:=1.0.0
 include $(INCLUDE_DIR)/package.mk
 
 define Package/netconflictscand
-	CATEGORY := Net
+	CATEGORY:=Network
 	TITLE:=Netconflictscand
 	DEPENDS := libubus libubox libblobmsg-json
 endef
 
 define Package/netconflictscand/description
-	Daemon that scans for conflicts in network
+	Daemon that monitors network interface configuration changes
+	and detects overlapping IP subnets assigned by different
+	DHCP servers.
 endef
 
 define Package/netconflictscand/install
