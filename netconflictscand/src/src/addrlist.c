@@ -90,8 +90,7 @@ int are_overlapping_subnets(struct Address *a1, struct Address *a2)
         uint32_t ip2 = ntohl(a2->ip);
         uint32_t net2_start = ip2 & mask2;
         uint32_t net2_end = net2_start | (~mask2);
-        syslog(LOG_DEBUG, )
-                return (net1_start <= net2_end) && (net2_start <= net1_end);
+        return (net1_start <= net2_end) && (net2_start <= net1_end);
 }
 
 struct Address *find_conflicts(struct Address **list, struct Address *addr)
